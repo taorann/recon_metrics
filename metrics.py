@@ -5,8 +5,8 @@
 计算由 recon.py 生成的 dire/dire2 的指标（D1、D2、DiffRecon）。
 
 输入：
-  - dire_dir:   包含 dire 的 .npy（与源文件同名），float16，形状为 (3,H,W) 或 (C,H,W)
-  - dire2_dir:  包含 dire2 的 .npy（与源文件同名），float16，形状为 (3,H,W)
+  - dire_dir:   包含 dire 的 .npy（与源文件同名），float32，形状为 (3,H,W) 或 (C,H,W)
+  - dire2_dir:  包含 dire2 的 .npy（与源文件同名），float32，形状为 (3,H,W)
 
 输出：
   - metrics_vis/
@@ -29,11 +29,12 @@ import argparse
 from typing import Tuple, Dict, List
 
 import numpy as np
-from PIL import Image
+import cv2
 
 import json
 import shutil
 import datetime as _dt
+import random
 
 
 def str2bool(s: str) -> bool:
@@ -104,23 +105,21 @@ def to_chw(arr: np.ndarray) -> np.ndarray:
 
 def save_png_from_tensor(t: np.ndarray, path: str):
     """
-    t: CHW uint8，C==1 或 3
-    这里是数值数组最终被转换为图像并保存的地方
+    t: CHW uint8，C==1 或 >=3（>3 仅取前三个）
+    与 compute_dire.py 一致：使用 cv2.imwrite；彩色时先 RGB→BGR。
     """
-    # 仅支持 CHW 格式，且通道数为 1 或 3；1 通道保存为 L，3 通道保存为 RGB；>3 通道只取前三个
     if t.ndim != 3:
-        raise ValueError("保存时期望 CHW 格式。")
-    if t.shape[0] == 1:
+        raise ValueError(f"保存时期望 CHW 格式，收到形状: {t.shape}")
+    C, H, W = t.shape
+    if t.dtype != np.uint8:
+        raise ValueError(f"输入数组必须为 uint8 类型，收到 {t.dtype}")
+    if C == 1:
         img = t[0]
-        im = Image.fromarray(img, mode="L")
-    elif t.shape[0] == 3:
-        img = t.transpose(1, 2, 0)
-        im = Image.fromarray(img, mode="RGB")
+        cv2.imwrite(path, img)
     else:
-        # 如果通道数 >3，只取前三个
-        img = t[:3].transpose(1, 2, 0)
-        im = Image.fromarray(img, mode="RGB")
-    im.save(path)
+        img = t[:3].transpose(1, 2, 0)  # (H,W,3) RGB
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(path, img)
 
 
 # 严格镜像模式：必须保证 dire_dir 与 dire2_dir 目录结构完全一致且文件同名；否则报错
@@ -202,9 +201,13 @@ def main():
                         help="只处理前 N 个样本（0=全部）")  # 处理样本数量限制
     parser.add_argument("--save_snapshot", type=str2bool, default=True, help="是否保存运行快照（脚本+参数+环境）。支持 True/False/1/0/yes/no")  # 是否保存快照
     parser.add_argument("--snapshot_dir", type=str, default="", help="快照输出目录（留空则用 out_root 下的 run_snapshots_metrics）")  # 快照目录
-    parser.add_argument("--vis_mode", type=str, default="adaptive",
+    parser.add_argument("--vis_mode", type=str, default="fixed",
                         choices=["fixed", "adaptive"],
                         help="可视化映射模式：'fixed' 为固定范围映射（默认），'adaptive' 为每样本自适应映射")
+    parser.add_argument("--pair_check", type=int, default=5,
+                        help="随机抽样 N 个 dire 文件，打印配对的 dire2 路径以验证镜像匹配")
+    parser.add_argument("--strict_basename", type=str2bool, default=True,
+                        help="是否严格断言 dire 与 dire2 同名（无扩展名），否则报错")
     args = parser.parse_args()
 
     # 准备输出目录
@@ -227,6 +230,16 @@ def main():
     if len(dire_list) == 0:
         raise RuntimeError(f"dire_dir={args.dire_dir} 中未找到 .npy 文件")
 
+    # 新增：pair_check 随机抽样打印配对路径
+    if args.pair_check > 0:
+        sample_count = min(args.pair_check, len(dire_list))
+        sampled_files = random.sample(dire_list, sample_count)
+        for dire_path in sampled_files:
+            dire2_path = derive_partner_path(dire_path, args.dire_dir, args.dire2_dir)
+            rel_dire = os.path.relpath(dire_path, args.dire_dir)
+            rel_dire2 = os.path.relpath(dire2_path, args.dire2_dir)
+            print(f"[PAIR] {rel_dire}  <->  {rel_dire2}")
+
     # 全局范围统计初始化（DiffRecon 的 min/max）
     global_min, global_max = float('inf'), float('-inf')
 
@@ -235,7 +248,14 @@ def main():
         # 查找配对的 dire2，严格镜像模式，不存在则报错
         dire2_path = derive_partner_path(dire_path, args.dire_dir, args.dire2_dir)
 
-        # 以 float32 计算更稳妥；再转回 float16 存 npz 降低体积
+        # 新增：strict_basename 断言同名
+        if args.strict_basename:
+            base_dire = os.path.splitext(os.path.basename(dire_path))[0]
+            base_dire2 = os.path.splitext(os.path.basename(dire2_path))[0]
+            if base_dire != base_dire2:
+                raise RuntimeError(f"[错误] strict_basename=True 时，dire 与 dire2 文件名不匹配: {dire_path} vs {dire2_path}")
+
+        # 全链路使用 float32（加载/计算/归档）
         dire = np.load(dire_path).astype(np.float32)
         dire2 = np.load(dire2_path).astype(np.float32)
         # 确保通道顺序一致以避免误用
@@ -265,9 +285,12 @@ def main():
             # 仅保存浮点原值，未做 [0,255] 映射；便于统计/阈值分析
             out_npz = os.path.join(f32_root, base + ".npz")
             np.savez_compressed(out_npz,
-                                D1=D1.astype(np.float16),
-                                D2=D2.astype(np.float16),
-                                DiffRecon=diff.astype(np.float16))
+                                D1=D1.astype(np.float32),
+                                D2=D2.astype(np.float32),
+                                DiffRecon=diff.astype(np.float32))
+            # 每 100 个样本打印一次保存日志
+            if k % 100 == 0:
+                print(f"[SAVE] metrics_floats -> {os.path.relpath(out_npz, f32_root)}")
 
         # 仅保存 DiffRecon 的 PNG 可视化
         if args.save_vis:
@@ -296,7 +319,10 @@ def main():
             df_u8 = to_chw(df_u8)
 
             # 这里只保存 DiffRecon 的 PNG 图像，不再保存 D1/D2
-            save_png_from_tensor(df_u8, os.path.join(vis_root, "DiffRecon", base + ".png"))
+            out_png = os.path.join(vis_root, "DiffRecon", base + ".png")
+            save_png_from_tensor(df_u8, out_png)
+            if k % 100 == 0:
+                print(f"[SAVE] metrics_vis/DiffRecon -> {os.path.relpath(out_png, vis_root)}")
 
         # 每 50 个样本打印一次
         if k % 50 == 0:
