@@ -13,9 +13,9 @@ Modified from guided-diffusion/scripts/image_sample.py
 
 存储策略：
 - 高频使用（便于下游 metrics 快速加载）：
-  - dire / dire2 分别保存为 `.npy`（float16），默认目录 `../dire` 与 `../dire2`，可通过 `--dire_dir / --dire2_dir` 指定。
+  - dire / dire2 分别保存为 `.npy`（float32），默认目录 `../dire` 与 `../dire2`，可通过 `--dire_dir / --dire2_dir` 指定。
 - 归档/追溯（占空间较大、低频）：
-  - recons / recons2（以及可选 latent/latent2、元信息 path 等）打包保存为压缩 `.npz`（float16）到 `../floats`，可通过 `--floats_dir` 指定。
+  - recons / recons2（以及可选 latent/latent2、元信息 path 等）打包保存为压缩 `.npz`（float32）到 `../floats`，可通过 `--floats_dir` 指定。
 - 本脚本**不再输出 PNG/JPG 图像**；可视化应在后续指标脚本中进行，并统一使用固定区间映射（如 |·| 指标用 [0,2]→[0,255]；有符号图用 [-2,2]→[0,255]），避免逐图自适应拉伸造成不可比性。
 
 说明：
@@ -317,18 +317,18 @@ def main():
                 os.makedirs(floats_save_dir, exist_ok=True)
                 base = os.path.splitext(fn_save)[0]
                 out_npz = os.path.join(floats_save_dir, base + ".npz")
-                # Prepare numpy arrays in float16 to reduce size
+                # Prepare numpy arrays in float32 for numerical fidelity
                 pkg = {
-                    "recons":  recons_float[i].cpu().numpy().astype(np.float16),
-                    "recons2": recons2_float[i].cpu().numpy().astype(np.float16),
+                    "recons":  recons_float[i].cpu().numpy().astype(np.float32),
+                    "recons2": recons2_float[i].cpu().numpy().astype(np.float32),
                     "path":    paths[i],
                     "image_size": np.int32(args.image_size),
                     "real_step":  np.int32(args.real_step),
                     "use_ddim":   np.bool_(args.use_ddim),
                 }
                 if getattr(args, "save_latent", False):
-                    pkg["latent"]  = latent_float[i].cpu().numpy().astype(np.float16)
-                    pkg["latent2"] = latent2_float[i].cpu().numpy().astype(np.float16)
+                    pkg["latent"]  = latent_float[i].cpu().numpy().astype(np.float32)
+                    pkg["latent2"] = latent2_float[i].cpu().numpy().astype(np.float32)
                 np.savez_compressed(out_npz, **pkg)
 
             # Save dire/dire2 as .npy (non-abs), high-frequency use
@@ -351,9 +351,9 @@ def main():
                 out_dire_npy  = os.path.join(dire_save_dir,  base + ".npy")
                 out_dire2_npy = os.path.join(dire2_save_dir, base + ".npy")
 
-                # Use float16 to reduce disk space; keep raw sign (no abs)
-                np.save(out_dire_npy,  dire_batch[i].cpu().numpy().astype(np.float16))
-                np.save(out_dire2_npy, dire2_batch[i].cpu().numpy().astype(np.float16))
+                # Use float32 for .npy for fast loading; keep raw sign (no abs)
+                np.save(out_dire_npy,  dire_batch[i].cpu().numpy().astype(np.float32))
+                np.save(out_dire2_npy, dire2_batch[i].cpu().numpy().astype(np.float32))
 
         if rank == 0:
             pct = 100.0 * have_finished_images / max(1, int(args.num_samples))
