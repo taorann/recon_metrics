@@ -2,26 +2,26 @@
 set -euo pipefail
 
 # ===== 基本配置 =====
-SPLIT_in="test/lsun_bedroom/ddpm"
-SPLIT="test/lsun_bedroom/ddpm"
+SPLIT_in="test/lsun_bedroom/pndm"
+SPLIT="test/lsun_adm/pndm"
 
-IMAGES_DIR="/root/autodl-tmp/data/images/${SPLIT_in}"  # 输入图像根目录（可含子文件夹）
-MODEL_PATH="/root/autodl-tmp/models/lsun_bedroom.pt"                           # 你的ADM权重
-OUT_ROOT="/root/autodl-tmp/data/our_no_no"                      # 输出根
+IMAGES_DIR="/root/autodl-tmp/data/images/${SPLIT_in}"   # 输入图像根目录（可含子文件夹）
+MODEL_PATH="/root/autodl-tmp/models/lsun_bedroom.pt"    # ADM 权重
+OUT_ROOT="/root/autodl-tmp/data/our_no_no"              # 输出根
 
 DIRE_DIR="${OUT_ROOT}/dire/${SPLIT}"
 DIRE2_DIR="${OUT_ROOT}/dire2/${SPLIT}"
 
-# 输出目录（只保留这三个；recons*/ 不再写PNG，仅用于日志或将来扩展）
+# 仅用于保存中间重建（npz），不再写 PNG
 RECONS_DIR="${OUT_ROOT}/recons/${SPLIT}"
 RECONS2_DIR="${OUT_ROOT}/recons2/${SPLIT}"
 FLOATS_DIR="${OUT_ROOT}/floats/${SPLIT}"
 
-BATCH_SIZE=128
+BATCH_SIZE=135
 TIMESTEP_RESPACING="ddim20"
 HAS_SUBFOLDER="False"     # 如果 IMAGES_DIR 下有类目子文件夹就设 True，否则 False
-RANK_SUBDIR="False"      # 多卡时是否按rank分子目录保存npz；无所谓时可 False
-SAVE_LATENT="False"      # 需要保存 latent/latent2 再改为 true
+RANK_SUBDIR="False"       # 多卡时是否按 rank 分子目录保存 npz；不需要可 False
+SAVE_LATENT="False"       # 需要保存 latent/latent2 再改为 True
 USE_FP16="True"
 USE_CHECKPOINT="False"
 
@@ -46,17 +46,17 @@ else
   TIME_CMD=(time)
 fi
 
-# ===== 单卡运行 =====
 echo "[RUN] 一次性处理全部 ${N_TOTAL} 张图片"
 
-# 将参数分组，便于维护与复用
+# 采样/扩散相关
 SAMPLE_FLAGS=(
   --batch_size "${BATCH_SIZE}"
   --num_samples "${N_TOTAL}"
   --timestep_respacing "${TIMESTEP_RESPACING}"
-  --use_ddim "True"
+  --use_ddim True            # 与 compute_dire 一致，重建确定性
 )
 
+# I/O 与保存（recon.py 内部已统一为 float32 保存，不需要你在脚本中设置 dtype）
 SAVE_FLAGS=(
   --images_dir "${IMAGES_DIR}"
   --recons_dir "${RECONS_DIR}"
@@ -71,9 +71,10 @@ SAVE_FLAGS=(
   --dire2_dir "${DIRE2_DIR}"
 )
 
+# 模型结构/推理精度
 MODEL_FLAGS=(
   --model_path "${MODEL_PATH}"
-  --image_size "256"
+  --image_size 256
   --num_channels 256
   --num_res_blocks 2
   --dropout 0.1
@@ -96,7 +97,6 @@ MODEL_FLAGS=(
   "${MODEL_FLAGS[@]}" \
   "${SAVE_FLAGS[@]}" \
   "${SAMPLE_FLAGS[@]}"
-
 
 # # ====== 所有循环结束后再关机 ======
 # echo "[ALL DONE] 所有任务完成，准备关机..."
