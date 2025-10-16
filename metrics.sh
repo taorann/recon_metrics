@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # 固定配置版：运行 compute_metrics.py
+# 现在支持 vis_mode=fixed/adaptive 与 log_every 控制日志频率
 # 适配 Zoe 的目录结构（dire / dire2 分别为 recon 结果）
 # ============================================================
 
@@ -26,7 +27,8 @@ ABS_FINAL_DIFF="False"
 SAVE_VIS="True"
 SAVE_FLOATS="True"
 LIMIT="0"
-
+# 可视化映射策略：fixed（固定区间）或 adaptive（自适应）
+VIS_MODE="adaptive"
 # 是否保存快照
 SAVE_SNAPSHOT="True"
 SNAPSHOT_DIR=""
@@ -34,14 +36,15 @@ SNAPSHOT_DIR=""
 #############################
 # 循环跑 train/val/test × {real, adm}
 #############################
-for SPLIT in test; do
-  for DOMAIN in ddpm; do
-    DIRE_DIR="${DIRE_ROOT}/${SPLIT}/lsun_bedroom/${DOMAIN}"
-    DIRE2_DIR="${DIRE2_ROOT}/${SPLIT}/lsun_bedroom/${DOMAIN}"
+for SPLIT in train val test; do
+  for DOMAIN in real adm; do
+    DIRE_DIR="${DIRE_ROOT}/${SPLIT}/lsun_adm/${DOMAIN}"
+    DIRE2_DIR="${DIRE2_ROOT}/${SPLIT}/lsun_adm/${DOMAIN}"
     OUT_DIR="${OUT_ROOT}/${SPLIT}/lsun_adm/${DOMAIN}"
 
     echo ">>> Running ${SPLIT}/${DOMAIN} ..."
-    python compute_metrics.py \
+    echo "    vis_mode=$VIS_MODE "
+    python metrics.py \
       --dire_dir "$DIRE_DIR" \
       --dire2_dir "$DIRE2_DIR" \
       --out_root "$OUT_DIR" \
@@ -50,9 +53,9 @@ for SPLIT in test; do
       --save_vis "$SAVE_VIS" \
       --save_floats "$SAVE_FLOATS" \
       --limit "$LIMIT" \
+      --vis_mode "$VIS_MODE" \
       --save_snapshot "$SAVE_SNAPSHOT" \
-      --snapshot_dir "$SNAPSHOT_DIR" \
-      --vis_mode "adaptive"
+      --snapshot_dir "$SNAPSHOT_DIR"
   done
 done
 
